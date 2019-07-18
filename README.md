@@ -6,6 +6,13 @@ of using a direct binary storage instead of JSON, for example much much faster s
 Obviously you shouldn't use this for configurable files, in that case JSON or YAML etc would probably be better,
 this library is only for files that are exclusively machine written and read.
 
+# Index
+- [Basic usage](#basic-usage)
+	- [Retrieving values](#retrieving-values)
+	- [Serialization and deserialization](#serialization-and-deserialization)
+	- [Creating an object](#creating-an-object)
+- [License](#license)
+
 # Basic usage
 Here is an example usage creating an array containing many different values including another array and an object.
 ```cpp
@@ -122,4 +129,28 @@ auto strValue = myObject["my-key"];
 std::cout << strValue->get<std::string>();
 ```
 
-###
+## License
+
+<img align="right" src="http://opensource.org/trademarks/opensource/OSI-Approved-License-100x137.png">
+
+MIT License 
+
+Copyright (c) 2013-2019 Yemiez
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
