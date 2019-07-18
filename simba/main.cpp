@@ -3,18 +3,43 @@
 
 int main()
 {
-	auto myArr = simba::array(24, 5676, "hello", "world");
-	auto obj = simba::object(
-		simba::pair("hello", 5),
-		simba::pair("item 2", "some string")
+	auto myArr = simba::array(
+		24, 
+		5676, 
+		"hello", 
+		"world", 
+		simba::array(
+			1, 
+			23l, 
+			4566u, 
+			static_cast<std::uint16_t>(423), 
+			static_cast<std::int64_t>(43563463477)
+		),
+		simba::object(
+			simba::pair("large-number", static_cast<std::int64_t>(4356346347456778887)),
+			simba::pair("null-value", nullptr),
+			simba::pair("single char", 'h')
+		),
+		"hey :)"
 	);
 
-	auto val_5676 = myArr[1].get<int>();
-	auto asUint = myArr[0].cast<std::uint32_t>();
+	{
+		myArr.serialize().to("output.simba");
+	}
 
-	auto str = obj["item 2"].get<std::string>();
-	auto str2 = obj["hello"].get<int>();
-	obj["test"] = 345;
+	auto myArr2 = simba::val();
+
+	{
+		myArr2.deserialize().from("output.simba");
+	}
+
+	if (myArr == myArr2) {
+		std::cout << "The two values are the same" << std::endl;
+	}
+	else {
+		std::cout << "The two values are not the same" << std::endl;
+	}
+	std::cin.get();
 
 	return 0;
 }

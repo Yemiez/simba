@@ -3,9 +3,13 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <fstream>
+#include <sstream>
 
 namespace simba {
 	constexpr auto VERSION_STRING = "1.0.0";
+	constexpr const char SIMBA_HEADER[] = { 'S', 'I', 'M', 'B', 'A' };
+	constexpr auto SIMBA_HEADER_LEN = sizeof(SIMBA_HEADER);
 
 	class simba_value;
 
@@ -15,6 +19,8 @@ namespace simba {
 	template<typename T>
 	simba_value val(T&& value);
 
+	simba_value val();
+
 	template<typename ...Args>
 	simba_value array(Args&& ...args);
 
@@ -22,6 +28,8 @@ namespace simba {
 	simba_value object(Args&& ...args);
 
 	namespace details {
+		std::uint8_t swap_uint8(std::uint8_t val);
+		std::int8_t swap_int8(std::int8_t val);
 		std::uint16_t swap_uint16(std::uint16_t val);
 		std::int16_t swap_int16(std::int16_t val);
 		std::uint32_t swap_uint32(std::uint32_t val);
@@ -29,15 +37,25 @@ namespace simba {
 		std::int64_t swap_int64(std::int64_t val);
 		std::uint64_t swap_uint64(std::uint64_t val);
 		std::uint8_t getEndianess();
+		bool hasTypeFlag(const std::uint8_t& type);
 
 		template<typename ...Args>
 		struct array_impl;
 
 		template<typename ...Args>
 		struct object_impl;
+
+		// Output
+		class simba_output_adapter;
+		class simba_stream_output_adapter;
+		class simba_serializer;
+
+		// Input
+		class simba_input_adapter;
+		class simba_string_input_adapter;
+		class simba_stream_input_adapter;
+		class simba_deserializer;
 	}
-
-
 
 	enum simba_endianess : std::uint8_t {
 		default_endianess,
@@ -179,7 +197,7 @@ namespace simba {
 		simba_value(std::initializer_list<simba_value> arrayValue)
 			: simba_value()
 		{
-			*this = std::move(arrayValue);
+			*this = simba_array_type{ std::move(arrayValue) };
 		}
 		simba_value(std::map<std::string, simba_value> objectValue)
 			: simba_value()
@@ -209,7 +227,31 @@ namespace simba {
 			this->wstring = nullptr;
 		}
 
-		std::uint32_t size()
+		// type, one of simba_type_t
+		const std::uint8_t& getType() const noexcept
+		{
+			return this->simbaType;
+		}
+
+		// type flag, one of simba_type_flag_t
+		// only releveant on types that can be signed/unsigned
+		const std::uint8_t& getTypeFlag() const noexcept
+		{
+			return this->simbaTypeFlag;
+		}
+
+		inline bool isSigned() const noexcept
+		{
+			return this->simbaTypeFlag == simba_type_flag_signed;
+		}
+
+		inline bool isUnsigned() const noexcept
+		{
+			return this->simbaTypeFlag == simba_type_flag_unsigned;
+		}
+
+		// only relevant for object/map and array.
+		std::uint32_t size() const noexcept
 		{
 			if (this->simbaType == simba_type_object) {
 				return this->objectValue->size();
@@ -221,7 +263,8 @@ namespace simba {
 			return 0u;
 		}
 
-		std::uint32_t length()
+		// only relevant for string types.
+		std::uint32_t length() const noexcept
 		{
 			if (this->simbaType == simba_type_string8) {
 				return this->string->length();
@@ -239,14 +282,192 @@ namespace simba {
 			return 0u;
 		}
 
-		auto& getArray()
+		simba_array_type& getArray()
 		{
 			return this->get<simba_array_type>();
 		}
 
-		auto& getObject()
+		simba_object_type& getObject()
 		{
 			return this->get<simba_object_type>();
+		}
+
+		const simba_array_type& getArray() const
+		{
+			return this->get<simba_array_type>();
+		}
+
+		const simba_object_type& getObject() const
+		{
+			return this->get<simba_object_type>();
+		}
+
+#pragma region
+
+		template<typename T>
+		const T& get() const
+		{
+			static_assert("No possible conversion for T");
+		}
+
+		template<>
+		const std::int8_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int8 || this->simbaTypeFlag != simba_type_flag_signed) {
+				throw std::exception("Attempted to retrieve int8_t when simba value isn't a int8_t (use cast instead).");
+			}
+
+			return this->simpleValue->int8;
+		}
+
+		template<>
+		const std::int16_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int16 || this->simbaTypeFlag != simba_type_flag_signed) {
+				throw std::exception("Attempted to retrieve int16_t when simba value isn't a int16_t (use cast instead).");
+			}
+
+			return this->simpleValue->int16;
+		}
+
+		template<>
+		const std::int32_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int32 || this->simbaTypeFlag != simba_type_flag_signed) {
+				throw std::exception("Attempted to retrieve int32 when simba value isn't a int32 (use cast instead).");
+			}
+
+			return this->simpleValue->int32;
+		}
+
+		template<>
+		const std::int64_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int64 || this->simbaTypeFlag != simba_type_flag_signed) {
+				throw std::exception("Attempted to retrieve int64_t when simba value isn't a int64_t (use cast instead).");
+			}
+
+			return this->simpleValue->int64;
+		}
+
+		template<>
+		const std::uint8_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int8 || this->simbaTypeFlag != simba_type_flag_unsigned) {
+				throw std::exception("Attempted to retrieve uint8_t when simba value isn't a uint8_t (use cast instead).");
+			}
+
+			return this->simpleValue->uint8;
+		}
+
+		template<>
+		const std::uint16_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int16 || this->simbaTypeFlag != simba_type_flag_unsigned) {
+				throw std::exception("Attempted to retrieve uint16_t when simba value isn't a uint16_t (use cast instead).");
+			}
+
+			return this->simpleValue->uint16;
+		}
+
+		template<>
+		const std::uint32_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int32 || this->simbaTypeFlag != simba_type_flag_unsigned) {
+				throw std::exception("Attempted to retrieve uint32_t when simba value isn't a uint32_t (use cast instead).");
+			}
+
+			return this->simpleValue->uint32;
+		}
+
+		template<>
+		const std::uint64_t& get<>() const
+		{
+			if (this->simbaType != simba_type_int64 || this->simbaTypeFlag != simba_type_flag_unsigned) {
+				throw std::exception("Attempted to retrieve uint64_t when simba value isn't a uint64_t (use cast instead).");
+			}
+
+			return this->simpleValue->uint64;
+		}
+
+		template<>
+		const float& get<>() const
+		{
+			if (this->simbaType != simba_type_float) {
+				throw std::exception("Attempted to retrieve a float when simba value isn't a float (use cast instead)");
+			}
+
+			return this->simpleValue->floatVal;
+		}
+
+		template<>
+		const double& get<>() const
+		{
+			if (this->simbaType != simba_type_double) {
+				throw std::exception("Attempted to retrieve a double when simba value isn't a double (use cast instead)");
+			}
+
+			return this->simpleValue->doubleVal;
+		}
+
+		template<>
+		const simba_object_type& get<>() const
+		{
+			if (this->simbaType != simba_type_object) {
+				throw std::exception("Attempted to retrieve an object when simba value isn't an object");
+			}
+
+			return *this->objectValue;
+		}
+
+		template<>
+		const simba_array_type& get<>() const
+		{
+			if (this->simbaType != simba_type_array) {
+				throw std::exception("Attempted to retrieve an array when simba value isn't an array");
+			}
+
+			return *this->arrayValue;
+		}
+
+		template<>
+		const std::string& get<>() const
+		{
+			if (this->simbaType != simba_type_string8) {
+				throw std::exception("Attempted to retrieve a string when simba value isn't a string");
+			}
+
+			return *this->string;
+		}
+
+		template<>
+		const std::u16string& get<>() const
+		{
+			if (this->simbaType != simba_type_string16) {
+				throw std::exception("Attempted to retrieve a u16string when simba value isn't a u16string");
+			}
+
+			return *this->u16string;
+		}
+
+		template<>
+		const std::u32string& get<>() const
+		{
+			if (this->simbaType != simba_type_string32) {
+				throw std::exception("Attempted to retrieve a u32string when simba value isn't a u32string");
+			}
+
+			return *this->u32string;
+		}
+
+		template<>
+		const std::wstring& get<>() const
+		{
+			if (this->simbaType != simba_type_string_w) {
+				throw std::exception("Attempted to retrieve a wstring when simba value isn't a wstring");
+			}
+
+			return *this->wstring;
 		}
 
 		template<typename T>
@@ -458,7 +679,13 @@ namespace simba {
 			throw std::exception("Unknown conversion to T");
 		}
 
+#pragma endregion getters
+
+		details::simba_serializer serialize() const;
+		details::simba_deserializer deserialize();
+
 	public: // operators
+#pragma region
 		simba_value& operator=(simba_value&& other)
 		{
 			this->simbaType = other.simbaType;
@@ -752,7 +979,7 @@ namespace simba {
 		simba_value& operator[](const std::uint32_t& index)
 		{
 			if (this->simbaType != simba_type_array) {
-				throw std::exception("Cannot retrieve integer index from non array type");
+				throw std::exception("Cannot retrieve with integer index from non array type");
 			}
 
 			return this->arrayValue->at(index);
@@ -761,7 +988,7 @@ namespace simba {
 		const simba_value& operator[](const std::uint32_t& index) const
 		{
 			if (this->simbaType != simba_type_array) {
-				throw std::exception("Cannot retrieve integer index from non array type");
+				throw std::exception("Cannot retrieve with integer index from non array type");
 			}
 
 			return this->arrayValue->at(index);
@@ -778,7 +1005,7 @@ namespace simba {
 			if (it != this->objectValue->end()) {
 				return it->second;
 			}
-			
+
 			(*this->objectValue)[index] = simba::val(nullptr);
 
 			return (*this->objectValue)[index];
@@ -798,6 +1025,119 @@ namespace simba {
 
 			throw std::exception("Cannot create item with operator[] when in const scope");
 		}
+
+		bool operator==(const simba_value& other) const
+		{
+			// Basic type check
+			if (other.simbaType != this->simbaType) {
+				return false;
+			}
+
+			// signed/unsigned check
+			if (simba::details::hasTypeFlag(this->simbaType) && other.simbaTypeFlag != this->simbaTypeFlag) {
+				return false;
+			}
+
+			switch (this->simbaType) {
+			case simba_type_null:
+				return true; // both are null
+				break;
+
+			case simba_type_int8:
+				if (this->isSigned()) {
+					return this->simpleValue->int8 == other.simpleValue->int8;
+				}
+				return this->simpleValue->uint8 == other.simpleValue->uint8;
+				break;
+			case simba_type_int16:
+				if (this->isSigned()) {
+					return this->simpleValue->int16 == other.simpleValue->int16;
+				}
+				return this->simpleValue->uint16 == other.simpleValue->uint16;
+				break;
+			case simba_type_int32:
+				if (this->isSigned()) {
+					return this->simpleValue->int32 == other.simpleValue->int32;
+				}
+				return this->simpleValue->uint32 == other.simpleValue->uint32;
+				break;
+			case simba_type_int64:
+				if (this->isSigned()) {
+					return this->simpleValue->int64 == other.simpleValue->int64;
+				}
+				return this->simpleValue->uint64 == other.simpleValue->uint64;
+				break;
+			case simba_type_float:
+				return this->simpleValue->floatVal == other.simpleValue->floatVal;
+				break;
+			case simba_type_double:
+				return this->simpleValue->doubleVal = other.simpleValue->doubleVal;
+				break;
+			case simba_type_array:
+				if (this->arrayValue->size() != other.arrayValue->size()) {
+					return false;
+				}
+
+				{ // compare all elements of the array
+					auto it1 = this->arrayValue->cbegin(),
+						end1 = this->arrayValue->cend(),
+						it2 = other.arrayValue->cbegin(),
+						end2 = other.arrayValue->cend();
+
+					for (; it1 != end1 && it2 != end2; ++it1, ++it2) {
+						if (*it1 != *it2) {
+							return false;
+						}
+					}
+
+					return true;
+				}
+				break;
+			case simba_type_object:
+				if (this->objectValue->size() != other.objectValue->size()) {
+					return false;
+				}
+
+				{ // recursively check all key/value pairs
+					for (auto it = this->objectValue->cbegin(), end = this->objectValue->cend();
+						it != end; ++it) {
+						auto found = other.objectValue->find(it->first);
+
+						if (found == other.objectValue->end()) {
+							return false;
+						}
+
+						if (it->second != found->second) {
+							return false;
+						}
+					}
+
+					return true;
+				}
+				break;
+			case simba_type_string8:
+				return *this->string == *other.string;
+				break;
+			case simba_type_string16:
+				return *this->u16string == *other.u16string;
+				break;
+			case simba_type_string32:
+				return *this->u32string == *other.u32string;
+				break;
+			case simba_type_string_w:
+				return *this->wstring == *other.wstring;
+				break;
+			}
+
+
+			return false; // unknown types??
+		}
+
+		bool operator!=(const simba_value& other) const
+		{
+			return !(*this == other);
+		}
+#pragma endregion operators
 
 	private: // general private functions
 
@@ -866,6 +1206,17 @@ namespace simba {
 	constexpr auto SIMBA_SIZE = sizeof(simba_value);
 }
 
+std::uint8_t simba::details::swap_uint8(std::uint8_t val)
+{
+	return static_cast<std::uint8_t>(swap_uint16(val));
+}
+
+//! Byte swap short
+std::int8_t simba::details::swap_int8(std::int8_t val)
+{
+	return static_cast<std::int8_t>(swap_int16(val));
+}
+
 std::uint16_t simba::details::swap_uint16(std::uint16_t val)
 {
 	return (val << 8) | (val >> 8);
@@ -911,6 +1262,11 @@ std::uint8_t simba::details::getEndianess()
 	return reinterpret_cast<std::int8_t*>(&word)[0] ? little_endian : big_endian;
 }
 
+bool simba::details::hasTypeFlag(const std::uint8_t & type)
+{
+	return type > simba_type_null&& type <= simba_type_int64;
+}
+
 template<typename T>
 std::pair<std::string, simba::simba_value> simba::pair(std::string str, T value)
 {
@@ -921,6 +1277,11 @@ template<typename T>
 simba::simba_value simba::val(T && value)
 {
 	return simba_value(std::forward<T>(value));
+}
+
+simba::simba_value simba::val()
+{
+	return { nullptr };
 }
 
 template<typename ...Args>
@@ -948,6 +1309,13 @@ struct simba::details::array_impl<T>
 	{
 		arr.getArray().emplace_back(simba::val(std::forward<T>(t)));
 	}
+};
+
+template<>
+struct simba::details::array_impl<>
+{
+	static void append(simba_value& arr)
+	{}
 };
 
 
@@ -978,3 +1346,545 @@ struct simba::details::object_impl<std::pair<T1, T2>>
 		obj.getObject()[pair.first] = simba::val(pair.second);
 	}
 };
+
+template<>
+struct simba::details::object_impl<>
+{
+	static void append(simba_value& obj)
+	{}
+};
+
+class simba::details::simba_input_adapter
+{
+public:
+	// return the size of the input buffer
+	virtual std::streamsize size() const = 0;
+
+	// return the cursor position
+	virtual std::streamsize cur() const = 0;
+
+	// read length amount of bytes into buffer
+	virtual std::streamsize read(char* buffer, std::streamsize length) = 0;
+};
+
+class simba::details::simba_string_input_adapter : public simba::details::simba_input_adapter
+{
+public:
+	simba_string_input_adapter(std::string str)
+		: str(std::move(str))
+	{}
+
+	std::streamsize size() const
+	{
+		return static_cast<std::streamsize>(this->str.length());
+	}
+
+	std::streamsize cur() const
+	{
+		return this->cursor;
+	}
+
+	std::streamsize read(char* buffer, std::streamsize length)
+	{
+		const auto beg = this->cursor;
+		auto end = this->cursor + length;
+
+		if (end >= this->str.length()) {
+			end = this->str.length() - 1;
+		}
+
+		const char* data = this->str.data();
+		while (length--) {
+			buffer[this->cursor - beg] = data[this->cursor];
+			++this->cursor;
+		}
+
+		return end - beg;
+	}
+
+private:
+	std::string str;
+	std::streamsize cursor = 0u;
+};
+
+class simba::details::simba_stream_input_adapter : public simba::details::simba_input_adapter
+{
+public:
+	simba_stream_input_adapter(std::basic_istream<char>& file)
+		: inputFile(&file)
+	{
+		this->inputFile->ignore(std::numeric_limits<std::streamsize>::max());
+		this->inputFile->seekg(0, std::ios::end);
+		this->fileLength = this->inputFile->gcount();
+		this->inputFile->clear();
+		this->inputFile->seekg(0, std::ios::beg);
+	}
+
+	std::streamsize size() const
+	{
+		return this->fileLength;
+	}
+
+	std::streamsize cur() const
+	{
+		return this->inputFile->tellg();
+	}
+
+	std::streamsize read(char* buffer, std::streamsize length)
+	{
+		this->inputFile->read(buffer, length);
+		return this->inputFile->gcount();
+	}
+
+private:
+	std::basic_istream<char>* inputFile = nullptr;
+	std::streamsize fileLength = 0u;
+};
+
+class simba::details::simba_output_adapter
+{
+public:
+	virtual std::streamsize write(const char* buffer, std::streamsize len) = 0;
+};
+
+class simba::details::simba_stream_output_adapter : public simba::details::simba_output_adapter
+{
+public:
+	simba_stream_output_adapter(std::basic_ostream<char>& file)
+		: file(&file)
+	{}
+
+	std::streamsize write(const char* buffer, std::streamsize len)
+	{
+		this->file->write(buffer, len);
+		return len;
+	}
+
+private:
+	std::basic_ostream<char>* file;
+};
+
+class simba::details::simba_serializer
+{
+public:
+	using adapter_t = simba::details::simba_output_adapter;
+
+public:
+	simba_serializer(const simba_value* value)
+		: value(value)
+	{}
+
+	void to(adapter_t& stream)
+	{
+		this->writeHeader(stream);
+		this->writeElement(stream, this->value);
+	}
+
+	void to(const std::string& filename)
+	{
+		std::ofstream fileStream{ filename, std::ios::binary };
+		simba::details::simba_stream_output_adapter adapter{ fileStream };
+		this->to(adapter);
+	}
+
+private:
+	void writeHeader(adapter_t& stream)
+	{
+		stream.write(simba::SIMBA_HEADER, simba::SIMBA_HEADER_LEN);
+
+		auto endianess = simba::details::getEndianess();
+		stream.write(reinterpret_cast<const char*>(&endianess), sizeof(endianess));
+	}
+
+	void writeElement(adapter_t& stream, const simba_value* value)
+	{
+		this->writeElementType(stream, value->getType(), value->getTypeFlag());
+
+		auto size = [&stream](const std::uint32_t & size) {
+			static_assert(sizeof(std::uint32_t) == 4, "Invalid integer size type");
+			stream.write(reinterpret_cast<const char*>(&size), sizeof(std::uint32_t)); // always write the size as a 4 byte unsigned integer.
+		};
+
+		switch (value->getType()) {
+		case simba_type_null:
+			// dont write anything
+			break;
+		case simba_type_int8:
+			if (value->isSigned()) {
+				size(sizeof(std::int8_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::int8_t>()), sizeof(std::int8_t));
+			}
+			else {
+				size(sizeof(std::uint8_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::uint8_t>()), sizeof(std::uint8_t));
+			}
+			break;
+		case simba_type_int16:
+			if (value->isSigned()) {
+				size(sizeof(std::int16_t));
+				stream.write(reinterpret_cast<const char*>(&value->get<std::int16_t>()), sizeof(std::int16_t));
+			}
+			else {
+				size(sizeof(std::uint16_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::uint16_t>()), sizeof(std::uint16_t));
+			}
+			break;
+		case simba_type_int32:
+			if (value->isSigned()) {
+				size(sizeof(std::int32_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::int32_t>()), sizeof(std::int32_t));
+			}
+			else {
+				size(sizeof(std::uint32_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::uint32_t>()), sizeof(std::uint32_t));
+			}
+			break;
+		case simba_type_int64:
+			if (value->isSigned()) {
+				size(sizeof(std::int64_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::int64_t>()), sizeof(std::int64_t));
+			}
+			else {
+				size(sizeof(std::uint64_t));
+				stream.write(reinterpret_cast<const char*> (&value->get<std::uint64_t>()), sizeof(std::uint64_t));
+			}
+			break;
+		case simba_type_float:
+			size(sizeof(float));
+			stream.write(reinterpret_cast<const char*> (&value->get<float>()), sizeof(float));
+			break;
+		case simba_type_double:
+			size(sizeof(double));
+			stream.write(reinterpret_cast<const char*> (&value->get<double>()), sizeof(double));
+			break;
+		case simba_type_array:
+			size(value->size());
+			for (auto& el : value->getArray()) {
+				this->writeElement(stream, &el);
+			}
+			break;
+		case simba_type_object:
+			size(value->size());
+			for (auto& el : value->getObject()) {
+				auto strEl = simba::val(el.first);
+				this->writeElement(stream, &strEl);
+				this->writeElement(stream, &el.second);
+			}
+			break;
+		case simba_type_string8:
+			size(sizeof(char));
+			size(value->length());
+			stream.write(reinterpret_cast<const char*>(value->get<std::string>().c_str()), value->length());
+			break;
+		case simba_type_string16:
+			size(sizeof(std::u16string::value_type));
+			size(value->length());
+			stream.write(reinterpret_cast<const char*>(value->get<std::u16string>().c_str()), value->length() * sizeof(std::u16string::value_type));
+			break;
+		case simba_type_string32:
+			size(sizeof(std::u32string::value_type));
+			size(value->length());
+			stream.write(reinterpret_cast<const char*>(value->get<std::u32string>().c_str()), value->length() * sizeof(std::u32string::value_type));
+			break;
+		case simba_type_string_w:
+			size(sizeof(std::wstring::value_type));
+			size(value->length());
+			stream.write(reinterpret_cast<const char*>(value->get<std::wstring>().c_str()), value->length() * sizeof(std::wstring::value_type));
+			break;
+		}
+	}
+
+	void writeElementType(adapter_t& stream, const std::uint8_t& type, const std::uint8_t& typeFlag)
+	{
+		// Write type
+		stream.write(reinterpret_cast<const char*>(&type), 1);
+
+		if (simba::details::hasTypeFlag(type)) {
+			stream.write(reinterpret_cast<const char*>(&typeFlag), 1);
+		}
+	}
+
+private:
+	const simba_value* value = nullptr;
+};
+
+class simba::details::simba_deserializer
+{
+public:
+	using adapter_t = simba::details::simba_input_adapter;
+
+public:
+	simba_deserializer(simba_value* value)
+		: value(value)
+	{}
+
+	void from(adapter_t& adapter)
+	{
+		this->readHeader(adapter);
+		this->readElement(adapter, this->value);
+	}
+
+	void from(const std::string& filename)
+	{
+		std::ifstream file{ filename, std::ios::binary };
+		simba::details::simba_stream_input_adapter adapter{ file };
+		this->from(adapter);
+	}
+
+	void fromString(const std::string& input)
+	{
+		simba::details::simba_string_input_adapter adapter{ input };
+		this->from(adapter);
+	}
+
+private:
+	void readHeader(adapter_t& adapter)
+	{
+		char header[5];
+
+		adapter.read(header, 5);
+
+		if (memcmp(header, simba::SIMBA_HEADER, simba::SIMBA_HEADER_LEN)) {
+			throw std::exception("Not a valid simba header!");
+		}
+
+		std::uint8_t endianess{ 0u };
+
+		adapter.read(reinterpret_cast<char*>(&endianess), 1);
+
+		if (endianess != simba::details::getEndianess()) {
+			this->needSwapEndianess = true;
+		}
+	}
+
+	std::pair<std::uint8_t, std::uint8_t> readElementType(adapter_t& adapter)
+	{
+		std::pair<std::uint8_t, std::uint8_t> result{ 0u, 0u };
+		adapter.read(reinterpret_cast<char*>(&result.first), 1);
+
+		if (this->needSwapEndianess) {
+			result.first = simba::details::swap_uint8(result.first);
+		}
+
+		if (simba::details::hasTypeFlag(result.first)) {
+			adapter.read(reinterpret_cast<char*>(&result.second), 1);
+
+			if (this->needSwapEndianess) {
+				result.second = simba::details::swap_uint8(result.first);
+			}
+		}
+
+		return result;
+	}
+
+	void readElement(adapter_t& adapter, simba_value* value)
+	{
+		auto typeInfo = this->readElementType(adapter);
+
+		switch (typeInfo.first) {
+		case simba_type_null:
+			*value = nullptr;
+			break;
+		case simba_type_int8:
+			if (typeInfo.second == simba_type_flag_signed) {
+				*value = this->readNextValue<std::int8_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_int8(value->get<std::int8_t>());
+				}
+			}
+			else {
+				*value = this->readNextValue<std::uint8_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_uint8(value->get<std::uint8_t>());
+				}
+			}
+			break;
+		case simba_type_int16:
+			if (typeInfo.second == simba_type_flag_signed) {
+				*value = this->readNextValue<std::int16_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_int16(value->get<std::int16_t>());
+				}
+			}
+			else {
+				*value = this->readNextValue<std::uint16_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_uint16(value->get<std::uint16_t>());
+				}
+			}
+			break;
+		case simba_type_int32:
+			if (typeInfo.second == simba_type_flag_signed) {
+				*value = this->readNextValue<std::int32_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_int32(value->get<std::int32_t>());
+				}
+			}
+			else {
+				*value = this->readNextValue<std::uint32_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_uint32(value->get<std::uint32_t>());
+				}
+			}
+			break;
+		case simba_type_int64:
+			if (typeInfo.second == simba_type_flag_signed) {
+				*value = this->readNextValue<std::int64_t>(adapter);
+
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_int64(value->get<std::int64_t>());
+				}
+			}
+			else {
+				*value = this->readNextValue<std::uint64_t>(adapter);
+
+				if (this->needSwapEndianess) {
+					*value = simba::details::swap_uint64(value->get<std::uint64_t>());
+				}
+			}
+			break;
+		case simba_type_float:
+			*value = this->readNextValue<float>(adapter);
+			break;
+		case simba_type_double:
+			*value = this->readNextValue<double>(adapter);
+			break;
+		case simba_type_object:
+			*value = simba::object();
+			this->readObject(adapter, value);
+			break;
+		case simba_type_array:
+			*value = simba::array();
+			this->readArray(adapter, value);
+			break;
+		case simba_type_string8:
+			this->readString<char>(adapter, value);
+			break;
+		case simba_type_string16:
+			this->readString<char16_t>(adapter, value);
+			break;
+		case simba_type_string32:
+			this->readString<char32_t>(adapter, value);
+			break;
+		case simba_type_string_w:
+			this->readString<wchar_t>(adapter, value);
+			break;
+
+		default:
+			throw std::exception("Unknown simba_value type read, corrupted file?");
+			break;
+		}
+	}
+
+	void readObject(adapter_t& adapter, simba_value* value)
+	{
+		auto objSize = this->getSize(adapter);
+
+		for (auto i = 0u; i < objSize; ++i) {
+			simba_value index{ nullptr },
+				element{ nullptr };
+
+			this->readElement(adapter, &index);
+			this->readElement(adapter, &element);
+
+			(*value)[index.get<std::string>()] = std::move(element);
+		}
+	}
+
+	void readArray(adapter_t& adapter, simba_value* value)
+	{
+		auto arrSize = this->getSize(adapter);
+		auto& arr = value->getArray();
+		arr.resize(arrSize);
+
+		for (auto i = 0u; i < arrSize; ++i) {
+			simba_value element{ nullptr };
+
+			this->readElement(adapter, &element);
+
+			arr[i] = std::move(element);
+		}
+	}
+
+	template<typename CharType = char>
+	void readString(adapter_t& adapter, simba_value* value)
+	{
+		std::basic_string<CharType> str;
+		auto strCharSize = this->getSize(adapter);
+		auto strLen = this->getSize(adapter);
+
+		str.resize(strLen);
+
+		adapter.read(reinterpret_cast<char*>(str.data()), strCharSize * strLen);
+
+		// Assign str
+		*value = std::move(str);
+	}
+
+	std::uint32_t getSize(adapter_t& adapter)
+	{
+		static_assert(sizeof(std::uint32_t) == 4, "Invalid integer size type");
+		std::uint32_t sz{ 0u };
+		adapter.read(reinterpret_cast<char*>(&sz), sizeof(std::uint32_t));
+
+		if (this->needSwapEndianess) {
+			sz = simba::details::swap_uint32(sz);
+		}
+
+		return sz;
+	}
+
+	template<typename T>
+	T readNextValue(adapter_t& adapter)
+	{
+		T t{ 0 };
+
+		auto size = this->getSize(adapter);
+
+		if (size > sizeof(T)) {
+			throw std::exception("Cannot read value into T because stored size is larger than size of T");
+		}
+
+		adapter.read(reinterpret_cast<char*>(&t), size);
+		return t;
+	}
+
+
+private:
+	simba_value* value;
+	bool needSwapEndianess = false;
+};
+
+simba::details::simba_serializer simba::simba_value::serialize() const
+{
+	return { this };
+}
+
+simba::details::simba_deserializer simba::simba_value::deserialize()
+{
+	return { this };
+}
+
+std::basic_ostream<char>& operator<<(std::basic_ostream<char> & output, const simba::simba_value & value)
+{
+	simba::details::simba_stream_output_adapter adapter{ output };
+	value.serialize().to(adapter);
+	return output;
+}
+
+
+
+std::basic_istream<char>& operator>>(std::basic_istream<char>& input, simba::simba_value& value)
+{
+	simba::details::simba_stream_input_adapter adapter{ input };
+	simba::details::simba_deserializer deserializer{ &value };
+	deserializer.from(adapter);
+	return input;
+}
