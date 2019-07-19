@@ -40,27 +40,27 @@ namespace simba {
 	std::pair<std::string, simba_value> pair(std::string str, T value);
 
 	template<typename T>
-	simba_value val(T&& value);
+	static simba_value val(T&& value);
 
-	simba_value val();
-
-	template<typename ...Args>
-	simba_value array(Args&& ...args);
+	static simba_value val();
 
 	template<typename ...Args>
-	simba_value object(Args&& ...args);
+	static simba_value array(Args&& ...args);
+
+	template<typename ...Args>
+	static simba_value object(Args&& ...args);
 
 	namespace details {
-		std::uint8_t swap_uint8(std::uint8_t val);
-		std::int8_t swap_int8(std::int8_t val);
-		std::uint16_t swap_uint16(std::uint16_t val);
-		std::int16_t swap_int16(std::int16_t val);
-		std::uint32_t swap_uint32(std::uint32_t val);
-		std::int32_t swap_int32(std::int32_t val);
-		std::int64_t swap_int64(std::int64_t val);
-		std::uint64_t swap_uint64(std::uint64_t val);
-		std::uint8_t getEndianess();
-		bool hasTypeFlag(const std::uint8_t& type);
+		static std::uint8_t swap_uint8(std::uint8_t val);
+		static std::int8_t swap_int8(std::int8_t val);
+		static std::uint16_t swap_uint16(std::uint16_t val);
+		static std::int16_t swap_int16(std::int16_t val);
+		static std::uint32_t swap_uint32(std::uint32_t val);
+		static std::int32_t swap_int32(std::int32_t val);
+		static std::int64_t swap_int64(std::int64_t val);
+		static std::uint64_t swap_uint64(std::uint64_t val);
+		static std::uint8_t getEndianess();
+		static bool hasTypeFlag(const std::uint8_t& type);
 
 		template<typename ...Args>
 		struct array_impl;
@@ -138,7 +138,7 @@ namespace simba {
 		{
 			*this = other;
 		}
-		simba_value(simba_value&& other)
+		simba_value(simba_value&& other) noexcept
 		{
 			*this = std::move(other);
 		}
@@ -704,8 +704,8 @@ namespace simba {
 
 #pragma endregion getters
 
-		details::simba_serializer serialize() const;
-		details::simba_deserializer deserialize();
+		inline details::simba_serializer serialize() const;
+		inline details::simba_deserializer deserialize();
 
 	public: // operators
 #pragma region
@@ -1895,16 +1895,14 @@ simba::details::simba_deserializer simba::simba_value::deserialize()
 	return { this };
 }
 
-std::basic_ostream<char>& operator<<(std::basic_ostream<char> & output, const simba::simba_value & value)
+static std::basic_ostream<char>& operator<<(std::basic_ostream<char> & output, const simba::simba_value & value)
 {
 	simba::details::simba_stream_output_adapter adapter{ output };
 	value.serialize().to(adapter);
 	return output;
 }
 
-
-
-std::basic_istream<char>& operator>>(std::basic_istream<char>& input, simba::simba_value& value)
+static std::basic_istream<char>& operator>>(std::basic_istream<char>& input, simba::simba_value& value)
 {
 	simba::details::simba_stream_input_adapter adapter{ input };
 	simba::details::simba_deserializer deserializer{ &value };
